@@ -8,6 +8,20 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module">
+      const isDevHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
+
+      if (!isDevHost) {
+        const style = document.createElement('link');
+        style.rel = 'stylesheet';
+        style.href = './assets/index.css';
+        document.head.appendChild(style);
+      }
+
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = isDevHost ? '/src/main.jsx' : './assets/index.js';
+      document.body.appendChild(script);
+    </script>
   </body>
 </html>
