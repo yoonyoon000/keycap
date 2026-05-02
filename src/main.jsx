@@ -40,6 +40,7 @@ function App() {
   const [stickerImage, setStickerImage] = useState(null);
   const [stickerTransform, setStickerTransform] = useState({ x: 0, y: 0, scale: 1, rotation: 0 });
   const webglAvailable = useWebglAvailable();
+  const [forceFallback, setForceFallback] = useState(false);
   const soundRef = useRef(null);
 
   useEffect(() => {
@@ -53,6 +54,7 @@ function App() {
   const setStickerValue = (key, value) => {
     setStickerTransform((current) => ({ ...current, [key]: Number(value) }));
   };
+  const useThreePreview = webglAvailable && !forceFallback;
 
   if (!started) {
     return <StartScreen onStart={() => setStarted(true)} />;
@@ -64,16 +66,33 @@ function App() {
         <WindowBar title="KEYCAP_MAKER.EXE" />
         <div className="preview-wrap">
           <div className="corner-folder">CUSTOM</div>
-          {webglAvailable ? (
-            <ThreePreview
-              tab={tab}
-              selectedShape={selectedShape}
-              selectedColor={selectedColor}
-              selectedLight={selectedLight}
-              stickerImage={stickerImage}
-              stickerTransform={stickerTransform}
-              playSound={playSound}
-            />
+          {useThreePreview ? (
+            <PreviewErrorBoundary
+              resetKey={`${selectedShape}-${selectedColor}-${selectedLight}-${tab}`}
+              onPreviewError={() => setForceFallback(true)}
+              fallback={
+                <FallbackPreview
+                  selectedShape={selectedShape}
+                  selectedColor={selectedColor}
+                  selectedLight={selectedLight}
+                  stickerImage={stickerImage}
+                  stickerTransform={stickerTransform}
+                  tab={tab}
+                  playSound={playSound}
+                />
+              }
+            >
+              <ThreePreview
+                tab={tab}
+                selectedShape={selectedShape}
+                selectedColor={selectedColor}
+                selectedLight={selectedLight}
+                stickerImage={stickerImage}
+                stickerTransform={stickerTransform}
+                playSound={playSound}
+                onContextLost={() => setForceFallback(true)}
+              />
+            </PreviewErrorBoundary>
           ) : (
             <FallbackPreview
               selectedShape={selectedShape}
@@ -85,7 +104,7 @@ function App() {
               playSound={playSound}
             />
           )}
-          {tab === 'Sticker' ? <div className="mode-chip">FRONT EDIT</div> : <div className="mode-chip">{webglAvailable ? 'DRAG / ZOOM' : '2.5D VIEW'}</div>}
+          {tab === 'Sticker' ? <div className="mode-chip">FRONT EDIT</div> : <div className="mode-chip">{useThreePreview ? 'DRAG / ZOOM' : '2.5D VIEW'}</div>}
         </div>
         <ControlPanel
           tab={tab}
@@ -110,6 +129,32 @@ function App() {
       </section>
     </main>
   );
+}
+
+class PreviewErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, resetKey: props.resetKey };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  static getDerivedStateFromProps(props, state) {
+    if (props.resetKey !== state.resetKey && !state.hasError) {
+      return { resetKey: props.resetKey };
+    }
+    return null;
+  }
+
+  componentDidCatch() {
+    this.props.onPreviewError?.();
+  }
+
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
 }
 
 function useWebglAvailable() {
@@ -149,7 +194,7 @@ function useWebglAvailable() {
   return available;
 }
 
-function ThreePreview({ tab, selectedShape, selectedColor, selectedLight, stickerImage, stickerTransform, playSound }) {
+function ThreePreview({ tab, selectedShape, selectedColor, selectedLight, stickerImage, stickerTransform, playSound, onContextLost }) {
   return (
     <Canvas
       camera={{ position: [0, 0.15, 5.2], fov: 40 }}
@@ -157,7 +202,10 @@ function ThreePreview({ tab, selectedShape, selectedColor, selectedLight, sticke
       gl={{ antialias: true, alpha: true, powerPreference: 'default' }}
       onPointerDown={() => tab !== 'Sticker' && playSound()}
       onCreated={({ gl }) => {
-        gl.domElement.addEventListener('webglcontextlost', (event) => event.preventDefault(), false);
+        gl.domElement.addEventListener('webglcontextlost', (event) => {
+          event.preventDefault();
+          onContextLost?.();
+        }, false);
       }}
     >
       <Suspense fallback={<Html center><span className="loading-text">loading...</span></Html>}>
@@ -537,13 +585,17 @@ function Range({ label, value, onChange, ...props }) {
 function createClickPlayer() {
   let context;
   const ensureContext = () => {
-    context ||= new AudioContext();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    context ||= new AudioContextClass();
     return context;
   };
 
   return (mode) => {
     if (mode === 'mute') return;
     const audio = ensureContext();
+    if (!audio) return;
+    audio.resume?.();
     const now = audio.currentTime;
     const gain = audio.createGain();
     gain.connect(audio.destination);
