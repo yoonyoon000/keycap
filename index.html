@@ -10,17 +10,18 @@
     <div id="root"></div>
     <script type="module">
       const isDevHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
+      const assetVersion = 'c92586c';
 
       if (!isDevHost) {
         const style = document.createElement('link');
         style.rel = 'stylesheet';
-        style.href = './assets/index.css';
+        style.href = `./assets/index.css?v=${assetVersion}`;
         document.head.appendChild(style);
       }
 
       const script = document.createElement('script');
       script.type = 'module';
-      script.src = isDevHost ? '/src/main.jsx' : './assets/index.js';
+      script.src = isDevHost ? '/src/main.jsx' : `./assets/index.js?v=${assetVersion}`;
       document.body.appendChild(script);
     </script>
   </body>
