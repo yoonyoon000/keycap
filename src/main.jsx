@@ -39,6 +39,7 @@ function App() {
   const [selectedSound, setSelectedSound] = useState('soft click');
   const [stickerImage, setStickerImage] = useState(null);
   const [stickerTransform, setStickerTransform] = useState({ x: 0, y: 0, scale: 1, rotation: 0 });
+  const webglAvailable = useWebglAvailable();
   const soundRef = useRef(null);
 
   useEffect(() => {
@@ -63,33 +64,28 @@ function App() {
         <WindowBar title="KEYCAP_MAKER.EXE" />
         <div className="preview-wrap">
           <div className="corner-folder">CUSTOM</div>
-          <Canvas
-            camera={{ position: [0, 0.15, 5.2], fov: 40 }}
-            dpr={[1, 1.7]}
-            gl={{ antialias: true, alpha: true }}
-            onPointerDown={() => tab !== 'Sticker' && playSound()}
-          >
-            <Suspense fallback={<Html center><span className="loading-text">loading...</span></Html>}>
-              <SceneLights />
-              <KeycapModel
-                shape={selectedShape}
-                color={selectedColor}
-                light={selectedLight}
-                stickerImage={stickerImage}
-                stickerTransform={stickerTransform}
-                frontMode={tab === 'Sticker'}
-              />
-              <OrbitControls
-                enabled={tab !== 'Sticker'}
-                enablePan={false}
-                minDistance={3.5}
-                maxDistance={7}
-                rotateSpeed={0.75}
-                zoomSpeed={0.55}
-              />
-            </Suspense>
-          </Canvas>
-          {tab === 'Sticker' ? <div className="mode-chip">FRONT EDIT</div> : <div className="mode-chip">DRAG / ZOOM</div>}
+          {webglAvailable ? (
+            <ThreePreview
+              tab={tab}
+              selectedShape={selectedShape}
+              selectedColor={selectedColor}
+              selectedLight={selectedLight}
+              stickerImage={stickerImage}
+              stickerTransform={stickerTransform}
+              playSound={playSound}
+            />
+          ) : (
+            <FallbackPreview
+              selectedShape={selectedShape}
+              selectedColor={selectedColor}
+              selectedLight={selectedLight}
+              stickerImage={stickerImage}
+              stickerTransform={stickerTransform}
+              tab={tab}
+              playSound={playSound}
+            />
+          )}
+          {tab === 'Sticker' ? <div className="mode-chip">FRONT EDIT</div> : <div className="mode-chip">{webglAvailable ? 'DRAG / ZOOM' : '2.5D VIEW'}</div>}
         </div>
         <ControlPanel
           tab={tab}
@@ -113,6 +109,131 @@ function App() {
         />
       </section>
     </main>
+  );
+}
+
+function useWebglAvailable() {
+  const [available, setAvailable] = useState(false);
+
+  useEffect(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) {
+        setAvailable(false);
+        return;
+      }
+
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      let renderer;
+
+      try {
+        console.error = () => {};
+        console.warn = () => {};
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'default' });
+        setAvailable(true);
+      } catch {
+        setAvailable(false);
+      } finally {
+        renderer?.dispose();
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+        console.error = originalError;
+        console.warn = originalWarn;
+      }
+    } catch {
+      setAvailable(false);
+    }
+  }, []);
+
+  return available;
+}
+
+function ThreePreview({ tab, selectedShape, selectedColor, selectedLight, stickerImage, stickerTransform, playSound }) {
+  return (
+    <Canvas
+      camera={{ position: [0, 0.15, 5.2], fov: 40 }}
+      dpr={[1, 1.7]}
+      gl={{ antialias: true, alpha: true, powerPreference: 'default' }}
+      onPointerDown={() => tab !== 'Sticker' && playSound()}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener('webglcontextlost', (event) => event.preventDefault(), false);
+      }}
+    >
+      <Suspense fallback={<Html center><span className="loading-text">loading...</span></Html>}>
+        <SceneLights />
+        <KeycapModel
+          shape={selectedShape}
+          color={selectedColor}
+          light={selectedLight}
+          stickerImage={stickerImage}
+          stickerTransform={stickerTransform}
+          frontMode={tab === 'Sticker'}
+        />
+        <OrbitControls
+          enabled={tab !== 'Sticker'}
+          enablePan={false}
+          minDistance={3.5}
+          maxDistance={7}
+          rotateSpeed={0.75}
+          zoomSpeed={0.55}
+        />
+      </Suspense>
+    </Canvas>
+  );
+}
+
+function FallbackPreview({ selectedShape, selectedColor, selectedLight, stickerImage, stickerTransform, tab, playSound }) {
+  const color = COLORS[selectedColor];
+  const blocks = SHAPES[selectedShape];
+  const bounds = useMemo(() => getShapeBounds(blocks), [blocks]);
+  const ringX = 50 + (bounds.maxX / Math.max(bounds.width, 2.1)) * 38 + 18;
+
+  return (
+    <button
+      className={`fallback-preview light-${selectedLight.toLowerCase()}`}
+      type="button"
+      onClick={() => tab !== 'Sticker' && playSound()}
+      aria-label="keycap preview"
+    >
+      <span className="fallback-base" />
+      <span className="fallback-ring" style={{ left: `${ringX}%` }} />
+      <span
+        className="fallback-keycap-group"
+        style={{
+          width: `${Math.max(bounds.width, 1) * 68}px`,
+          height: `${Math.max(bounds.height, 1) * 68}px`
+        }}
+      >
+        {blocks.map((block, index) => {
+          const left = ((block.x - bounds.minX - 0.5) / bounds.width) * 100;
+          const top = ((bounds.maxY - block.y - 0.5) / bounds.height) * 100;
+          return (
+            <span
+              key={`${block.x}-${block.y}`}
+              className="fallback-keycap"
+              style={{
+                left: `${left}%`,
+                top: `${top}%`,
+                backgroundColor: color.main,
+                opacity: selectedColor.includes('clear') || selectedColor === 'transparent' ? 0.72 : 1
+              }}
+            >
+              {index === 0 && stickerImage && (
+                <img
+                  alt=""
+                  src={stickerImage}
+                  className="fallback-sticker"
+                  style={{
+                    transform: `translate(${stickerTransform.x * 90}px, ${-stickerTransform.y * 90}px) rotate(${stickerTransform.rotation}deg) scale(${stickerTransform.scale})`
+                  }}
+                />
+              )}
+            </span>
+          );
+        })}
+      </span>
+    </button>
   );
 }
 
